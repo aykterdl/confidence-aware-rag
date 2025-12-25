@@ -75,16 +75,19 @@ public class RagAnswerService : IRagAnswerService
                 cancellationToken
             );
 
-            // Fallback response (no context)
-            var noContextAnswer = isTurkish
-                ? "Bu soru, sağlanan belgelerden cevaplanamıyor."
-                : "I don't have enough information to answer this question based on the provided documents.";
-
+            // NO RELEVANT CHUNKS FOUND
             if (searchResults.Count == 0)
             {
-                _logger.LogWarning("⚠️ No relevant documents found for question");
+                _logger.LogWarning("⚠️ REASON: NoRelevantChunks - Vector search returned 0 results");
                 
-                // Conversation'a ekle
+                var noContextAnswer = isTurkish
+                    ? "Üzgünüm, bu soruyla ilgili yüklü belgelerde hiçbir bilgi bulamadım. Lütfen farklı bir soru sormayı deneyin."
+                    : "I'm sorry, but I couldn't find any information related to this question in the available documents. Please try asking a different question.";
+                
+                var explanation = isTurkish
+                    ? "Veritabanında bu soruyla ilgili hiçbir belge bulunamadı."
+                    : "No documents matching this query were found in the database.";
+                
                 _conversationStore.AddTurn(conversationId, request.Question, noContextAnswer);
                 
                 return new RagResponse
@@ -98,7 +101,7 @@ public class RagAnswerService : IRagAnswerService
                         Level = "none",
                         MaxSimilarity = 0.0,
                         AverageSimilarity = 0.0,
-                        Explanation = "No relevant documents found"
+                        Explanation = explanation
                     },
                     Sources = new List<SourceReference>(),
                     SourceCount = 0,
@@ -115,15 +118,21 @@ public class RagAnswerService : IRagAnswerService
             _logger.LogInformation("📊 Similarity Scores: Max={Max:F4}, Avg={Avg:F4}, MinThreshold={MinThreshold:F4}",
                 maxSimilarity, avgSimilarity, _confidenceSettings.MinAnswerSimilarity);
 
-            // Relevance Gate: Too low similarity → don't call LLM
+            // RELEVANCE GATE: Similarity too low → don't call LLM
             if (maxSimilarity < _confidenceSettings.MinAnswerSimilarity)
             {
-                _logger.LogWarning("🚫 RELEVANCE GATE: MaxSimilarity ({Max:F4}) below threshold ({Threshold:F4}). Skipping LLM.",
+                _logger.LogWarning("🚫 REASON: BelowRelevanceThreshold - MaxSim: {Max:F4} < Threshold: {Threshold:F4}",
                     maxSimilarity, _confidenceSettings.MinAnswerSimilarity);
                 
                 var lowRelevanceAnswer = isTurkish
-                    ? "Bu soru, mevcut belgelerle yeterince ilgili değil. Daha spesifik bir soru sorabilir misiniz?"
-                    : "This question doesn't seem sufficiently related to the available documents. Could you ask a more specific question?";
+                    ? $"Bu soruyla ilgili bazı belgeler buldum ancak yeterince benzer değiller (benzerlik: %{maxSimilarity * 100:F1}). " +
+                      "Daha spesifik veya belgelerle daha alakalı bir soru sorabilir misiniz?"
+                    : $"I found some documents related to this question, but they don't seem closely related enough (similarity: {maxSimilarity * 100:F1}%). " +
+                      "Could you ask a more specific question or one more closely related to the documents?";
+                
+                var explanation = isTurkish
+                    ? $"Benzerlik çok düşük (en yüksek: %{maxSimilarity * 100:F1}, gerekli: %{_confidenceSettings.MinAnswerSimilarity * 100:F0}). Güvenilir bir cevap veremem."
+                    : $"Similarity too low (max: {maxSimilarity * 100:F1}%, required: {_confidenceSettings.MinAnswerSimilarity * 100:F0}%). Cannot provide a reliable answer.";
                 
                 _conversationStore.AddTurn(conversationId, request.Question, lowRelevanceAnswer);
                 
@@ -138,7 +147,7 @@ public class RagAnswerService : IRagAnswerService
                         Level = "none",
                         MaxSimilarity = Math.Round(maxSimilarity, 4),
                         AverageSimilarity = Math.Round(avgSimilarity, 4),
-                        Explanation = $"Similarity too low (max: {maxSimilarity:F4}, threshold: {_confidenceSettings.MinAnswerSimilarity:F4})"
+                        Explanation = explanation
                     },
                     Sources = searchResults.Select(r => new SourceReference
                     {
@@ -154,11 +163,12 @@ public class RagAnswerService : IRagAnswerService
                 };
             }
 
-            // Determine confidence level
+            // Determine confidence level and reason
             var confidenceLevel = maxSimilarity >= _confidenceSettings.LowConfidenceThreshold ? "high" : "low";
+            var answerReason = confidenceLevel == "high" ? AnswerReason.StrongMatch : AnswerReason.PartialMatch;
             
-            _logger.LogInformation("✅ Confidence Level: {Level} (MaxSim: {Max:F4}, LowThreshold: {Threshold:F4})",
-                confidenceLevel, maxSimilarity, _confidenceSettings.LowConfidenceThreshold);
+            _logger.LogInformation("✅ REASON: {Reason} - Confidence: {Level} (MaxSim: {Max:F4}, Threshold: {Threshold:F4})",
+                answerReason, confidenceLevel, maxSimilarity, _confidenceSettings.LowConfidenceThreshold);
 
             // STEP 2: Context oluştur (chunks + conversation history)
             _logger.LogInformation("Step 2: Building context...");
@@ -195,10 +205,14 @@ public class RagAnswerService : IRagAnswerService
             _conversationStore.AddTurn(conversationId, request.Question, answer);
             _logger.LogDebug("Added turn to conversation {ConversationId}", conversationId);
 
-            // Confidence explanation
+            // Human-readable confidence explanation
             var confidenceExplanation = confidenceLevel == "high"
-                ? $"High confidence based on strong similarity (max: {maxSimilarity:F4})"
-                : $"Low confidence - answer may be incomplete (max: {maxSimilarity:F4}, threshold: {_confidenceSettings.LowConfidenceThreshold:F4})";
+                ? (isTurkish 
+                    ? $"Yüksek güvenilirlik - belgelerle güçlü eşleşme (benzerlik: %{maxSimilarity * 100:F1})" 
+                    : $"High confidence - strong match with documents (similarity: {maxSimilarity * 100:F1}%)")
+                : (isTurkish
+                    ? $"Düşük güvenilirlik - cevap eksik veya belirsiz olabilir (benzerlik: %{maxSimilarity * 100:F1}, ideal: %{_confidenceSettings.LowConfidenceThreshold * 100:F0}+)"
+                    : $"Low confidence - answer may be incomplete or uncertain (similarity: {maxSimilarity * 100:F1}%, ideal: {_confidenceSettings.LowConfidenceThreshold * 100:F0}%+)");
 
             var response = new RagResponse
             {
@@ -320,7 +334,18 @@ public class RagAnswerService : IRagAnswerService
 
         // Low confidence mode - extra caution instructions
         var confidenceInstructions = confidenceLevel == "low"
-            ? @"
+            ? (isTurkish
+                ? @"
+
+⚠️ DÜŞÜK GÜVENİLİRLİK MODU:
+- Soru ile belgeler arasındaki benzerlik DÜŞÜK
+- DİKKATLİ cevap ver ve belirsizliği belirt
+- Koşullu dil kullan: ""olabilir"", ""görünüyor"", ""muhtemelen""
+- Kesin iddialardan veya güçlü ifadelerden kaçın
+- Cevap kısmi veya belirsizse bunu açıkça belirt
+- Örnek: ""Belgelerden anladığım kadarıyla..."", ""Tam olarak belirtilmemekle birlikte...""
+"
+                : @"
 
 ⚠️ LOW CONFIDENCE MODE:
 - The similarity between the question and documents is LOW
@@ -328,7 +353,8 @@ public class RagAnswerService : IRagAnswerService
 - Use conditional language: ""may"", ""might"", ""appears to"", ""suggests that""
 - Avoid absolute claims or strong assertions
 - Clearly state if the answer is partial or uncertain
-"
+- Example phrases: ""Based on the available information..."", ""While not explicitly stated...""
+")
             : string.Empty;
 
         return $@"You are a helpful assistant that answers questions based on provided documents.

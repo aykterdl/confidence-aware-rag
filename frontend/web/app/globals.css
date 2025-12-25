@@ -8,4 +8,14 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: #0f172a; /* slate-900 */
+}
+
+/* Input ve textarea için default renkler */
+input, textarea {
+  color: #0f172a; /* slate-900 */
+}
+
+input::placeholder, textarea::placeholder {
+  color: #94a3b8; /* slate-400 */
 }

@@ -64,28 +64,41 @@ public class ChunkIngestionService : IChunkIngestionService
 
             _logger.LogInformation("Document created with ID: {DocumentId}", document.Id);
 
-            // 2. Text'i chunk'lara böl
-            _logger.LogInformation("Step 2: Starting text chunking...");
-            var textChunks = _chunkingService.ChunkText(text, maxChunkSize: 500, overlap: 50);
-            _logger.LogInformation("Step 2 COMPLETED: Text split into {Count} chunks", textChunks.Count);
+            // 2. Text'i SEMANTIC-AWARE chunk'lara böl
+            _logger.LogInformation("Step 2: Starting SEMANTIC text chunking...");
+            var chunkResults = _chunkingService.ChunkTextWithMetadata(text, maxChunkSize: 500, overlap: 50);
+            _logger.LogInformation("Step 2 COMPLETED: Text split into {Count} chunks", chunkResults.Count);
 
-            if (textChunks.Count == 0)
+            if (chunkResults.Count == 0)
             {
                 _logger.LogWarning("No chunks created from text. Aborting ingestion.");
                 throw new InvalidOperationException("Text chunking produced zero chunks");
             }
 
+            // Log chunk type distribution
+            var typeDistribution = chunkResults
+                .GroupBy(c => c.Metadata.ChunkType)
+                .Select(g => $"{g.Key}: {g.Count()}")
+                .ToList();
+            _logger.LogInformation("Chunk type distribution: {Distribution}", string.Join(", ", typeDistribution));
+
             // 3. Her chunk için embedding üret ve kaydet
-            _logger.LogInformation("Step 3: Starting embedding generation for {Count} chunks...", textChunks.Count);
+            _logger.LogInformation("Step 3: Starting embedding generation for {Count} chunks...", chunkResults.Count);
             var chunkEntities = new List<Chunk>();
 
-            for (int i = 0; i < textChunks.Count; i++)
+            for (int i = 0; i < chunkResults.Count; i++)
             {
-                var chunkText = textChunks[i];
+                var chunkResult = chunkResults[i];
+                var chunkText = chunkResult.Content;
+                var chunkMeta = chunkResult.Metadata;
                 var chunkId = Guid.NewGuid();
                 
-                _logger.LogInformation("Step 3.{Index}: Processing chunk {Index}/{Total} (ID: {ChunkId}, Length: {Length})", 
-                    i + 1, i + 1, textChunks.Count, chunkId, chunkText.Length);
+                var metaInfo = chunkMeta.ChunkType == "article" 
+                    ? $"Article {chunkMeta.ArticleNumber}: {chunkMeta.ArticleTitle}" 
+                    : chunkMeta.ChunkType;
+                
+                _logger.LogInformation("Step 3.{Index}: Processing chunk {Index}/{Total} [{Type}] (ID: {ChunkId}, Length: {Length})", 
+                    i + 1, i + 1, chunkResults.Count, metaInfo, chunkId, chunkText.Length);
 
                 try
                 {
@@ -102,7 +115,7 @@ public class ChunkIngestionService : IChunkIngestionService
                     var embedding = new Vector(embeddingArray);
                     _logger.LogDebug("Converted embedding to Vector type for chunk {Index}", i + 1);
 
-                    // Chunk entity oluştur
+                    // Chunk entity oluştur (METADATA İLE)
                     var chunk = new Chunk
                     {
                         Id = chunkId,
@@ -111,16 +124,20 @@ public class ChunkIngestionService : IChunkIngestionService
                         Content = chunkText,
                         Embedding = embedding,
                         TokenCount = EstimateTokenCount(chunkText),
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.UtcNow,
+                        // NEW: Semantic metadata
+                        ArticleNumber = chunkMeta.ArticleNumber,
+                        ArticleTitle = chunkMeta.ArticleTitle,
+                        ChunkType = chunkMeta.ChunkType
                     };
 
                     chunkEntities.Add(chunk);
-                    _logger.LogInformation("Chunk entity created and added to list: {Index}/{Total}", i + 1, textChunks.Count);
+                    _logger.LogInformation("Chunk entity created and added to list: {Index}/{Total}", i + 1, chunkResults.Count);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process chunk {Index}/{Total}. Chunk text: {Text}", 
-                        i + 1, textChunks.Count, chunkText.Substring(0, Math.Min(100, chunkText.Length)));
+                        i + 1, chunkResults.Count, chunkText.Substring(0, Math.Min(100, chunkText.Length)));
                     throw;
                 }
             }
@@ -136,8 +153,8 @@ public class ChunkIngestionService : IChunkIngestionService
             _logger.LogInformation("Step 4 COMPLETED: {SavedCount} chunk records saved to database", savedChunks);
 
             // 5. Document'ın chunk sayısını güncelle
-            _logger.LogInformation("Step 5: Updating document total_chunks to {Count}...", textChunks.Count);
-            document.TotalChunks = textChunks.Count;
+            _logger.LogInformation("Step 5: Updating document total_chunks to {Count}...", chunkResults.Count);
+            document.TotalChunks = chunkResults.Count;
             var updatedRows = await _dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Step 5 COMPLETED: Document updated ({UpdatedRows} rows affected)", updatedRows);
 
@@ -148,12 +165,12 @@ public class ChunkIngestionService : IChunkIngestionService
 
             _logger.LogInformation(
                 "✅ TEXT INGESTION COMPLETED SUCCESSFULLY - Document ID: {DocumentId}, Chunks: {ChunkCount}",
-                document.Id, textChunks.Count
+                document.Id, chunkResults.Count
             );
 
             return new ChunkIngestionResult(
                 document.Id,
-                textChunks.Count,
+                chunkResults.Count,
                 documentTitle
             );
         }

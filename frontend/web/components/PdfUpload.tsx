@@ -181,7 +181,7 @@ export function PdfUpload() {
               onChange={(e) => setTitle(e.target.value)}
               disabled={isUploading}
               placeholder="e.g., TC Anayasası"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed text-sm"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed text-sm text-slate-900 placeholder:text-slate-400"
             />
           </div>
         )}

@@ -26,6 +26,16 @@ public class Chunk
     
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    
+    // Semantic chunking metadata
+    [Column("article_number")]
+    public string? ArticleNumber { get; set; } // e.g. "1", "2", "3a"
+    
+    [Column("article_title")]
+    public string? ArticleTitle { get; set; } // e.g. "Devletin Şekli", "Introduction"
+    
+    [Column("chunk_type")]
+    public string ChunkType { get; set; } = "generic"; // "article" | "paragraph" | "generic"
 
     // Navigation property
     public Document Document { get; set; } = null!;

@@ -1,24 +1,10 @@
 version: "3.9"
 
+# SIMPLIFIED docker-compose for RAG demo
+# Removed: nginx, api-gateway (not used in current architecture)
+# Frontend runs separately via: cd frontend/web && npm run dev
+
 services:
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - frontend
-      - api-gateway
-
-  frontend:
-    build: ./frontend/web
-
-  api-gateway:
-    build: ./backend/ApiGateway
-    depends_on:
-      - rag-api
 
   rag-api:
     build: ./backend/RAG.Api

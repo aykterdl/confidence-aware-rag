@@ -27,7 +27,8 @@ public class RagDbContext : DbContext
             entity.ToTable("documents");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Filename).HasMaxLength(500).IsRequired();
-            entity.Property(e => e.Metadata).HasColumnType("jsonb");
+            // Metadata as text (not jsonb) to support both JSON and plain string
+            entity.Property(e => e.Metadata).HasColumnType("text");
         });
 
         // Chunk entity
