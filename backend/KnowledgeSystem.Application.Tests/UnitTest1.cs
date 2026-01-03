@@ -1,4 +1,4 @@
-﻿namespace KnowledgeSystem.Domain.Tests;
+﻿namespace KnowledgeSystem.Application.Tests;
 
 public class UnitTest1
 {

@@ -35,14 +35,13 @@ public sealed class ConfidenceScore
     }
 
     /// <summary>
-    /// Calculate confidence based on similarity scores and thresholds
-    /// DOMAIN RULE: Confidence level is determined by max similarity against thresholds
+    /// Calculate confidence based on similarity scores and policy
+    /// DOMAIN RULE: Confidence level is determined by max similarity against policy thresholds
     /// </summary>
     public static ConfidenceScore Calculate(
         double maxSimilarity,
         double averageSimilarity,
-        double minAcceptableThreshold,
-        double lowConfidenceThreshold)
+        ConfidencePolicy policy)
     {
         // Validate inputs
         if (maxSimilarity < 0 || maxSimilarity > 1)
@@ -50,21 +49,12 @@ public sealed class ConfidenceScore
         
         if (averageSimilarity < 0 || averageSimilarity > 1)
             throw new ArgumentOutOfRangeException(nameof(averageSimilarity));
-        
-        if (minAcceptableThreshold < 0 || minAcceptableThreshold > 1)
-            throw new ArgumentOutOfRangeException(nameof(minAcceptableThreshold));
-        
-        if (lowConfidenceThreshold < 0 || lowConfidenceThreshold > 1)
-            throw new ArgumentOutOfRangeException(nameof(lowConfidenceThreshold));
-        
-        if (lowConfidenceThreshold < minAcceptableThreshold)
-            throw new ArgumentException("Low confidence threshold must be >= min acceptable threshold");
 
-        // DOMAIN LOGIC: Determine confidence level
+        // DOMAIN LOGIC: Determine confidence level using policy
         var level = maxSimilarity switch
         {
-            var s when s < minAcceptableThreshold => ConfidenceLevel.None,
-            var s when s < lowConfidenceThreshold => ConfidenceLevel.Low,
+            var s when s < policy.MinAcceptableThreshold => ConfidenceLevel.None,
+            var s when s < policy.LowConfidenceThreshold => ConfidenceLevel.Low,
             _ => ConfidenceLevel.High
         };
 
@@ -80,6 +70,29 @@ public sealed class ConfidenceScore
     /// DOMAIN RULE: Answer requires caution if confidence is Low
     /// </summary>
     public bool RequiresCaution() => Level == ConfidenceLevel.Low;
+
+    /// <summary>
+    /// Get human-readable explanation of confidence level
+    /// DOMAIN RESPONSIBILITY: Domain determines how confidence is explained
+    /// </summary>
+    public string GetExplanation()
+    {
+        return Level switch
+        {
+            ConfidenceLevel.None =>
+                $"No relevant information found. Similarity score too low ({MaxSimilarity:P1}).",
+
+            ConfidenceLevel.Low =>
+                $"Partial match found ({MaxSimilarity:P1} similarity). " +
+                "The answer may be incomplete or uncertain.",
+
+            ConfidenceLevel.High =>
+                $"Strong match found ({MaxSimilarity:P1} similarity). " +
+                "The answer is based on highly relevant content.",
+
+            _ => "Unknown confidence level"
+        };
+    }
 
     public override string ToString() => 
         $"Confidence: {Level} (Max: {MaxSimilarity:P1}, Avg: {AverageSimilarity:P1})";
