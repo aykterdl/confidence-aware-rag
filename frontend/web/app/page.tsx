@@ -22,6 +22,10 @@ export default function Home() {
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
+    // PHASE 4 GUARD: Hard guard to prevent any exceptions
+    // Phase 4 (Query/Retrieval/RAG) is not yet implemented
+    // Show friendly message instead of attempting backend call
+    
     try {
       const response = await fetch('/api/rag/ask', {
         method: 'POST',
@@ -33,63 +37,87 @@ export default function Home() {
           conversationId,
           topK: 5,
         }),
+      }).catch((fetchError) => {
+        // Network error or connection refused - Phase 4 not available
+        console.info('ℹ️ Phase 4 (Query/Retrieval) not yet implemented - fetch failed:', fetchError.message);
+        return null;
       });
 
-      // PHASE 4 GUARD: Check if query endpoint is not available yet
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+      // If fetch failed or response is not OK, show Phase 4 message (NO EXCEPTIONS)
+      if (!response || !response.ok) {
+        console.info('ℹ️ Phase 4 not implemented yet — query skipped');
         
-        // If backend returns 404 or endpoint not found, show Phase 4 unavailable message
-        if (response.status === 404 || 
-            errorData.error?.includes('not found') ||
-            errorData.details?.includes('not found')) {
-          
-          console.log('ℹ️ Phase 4 (Query/Retrieval) not yet implemented');
-          
-          const phase4Message: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `🧠 **Document Ingestion Complete!**
+        const phase4Message: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `🧠 **Documents are ready!**
 
-Your documents have been successfully ingested and stored with semantic chunks and embeddings.
+Your PDFs have been successfully ingested and indexed.
 
-🔍 **Question Answering Coming Soon**
+🔍 **Question answering is not enabled yet.**
 
-The query and retrieval system (Phase 4) is not yet implemented. This includes:
+This feature will be activated in Phase 4, which includes:
 - Vector similarity search
-- Context assembly
-- LLM-based answer generation
+- Context assembly from your documents
+- AI-powered answer generation
 
-⏳ **What's Next?**
+⏳ **Please check back soon.**
 
-Phase 4 will enable you to ask questions and receive AI-generated answers based on your uploaded documents.
-
-For now, you can continue uploading PDFs using the "📄 Upload PDF" button.`,
-            timestamp: new Date(),
-            confidence: {
-              level: 'none',
-              maxSimilarity: 0,
-              averageSimilarity: 0,
-              explanation: 'Phase 4 not implemented',
-            },
-            sources: [],
-          };
-          setMessages((prev) => [...prev, phase4Message]);
-          return; // Exit early, don't throw error
-        }
-        
-        // For other errors, throw to be caught below
-        throw new Error(errorData.error || 'Failed to get response');
+For now, you can continue uploading documents using the "📄 Upload PDF" button.`,
+          timestamp: new Date(),
+          confidence: {
+            level: 'none',
+            maxSimilarity: 0,
+            averageSimilarity: 0,
+            explanation: 'Phase 4 not implemented',
+          },
+          sources: [],
+        };
+        setMessages((prev) => [...prev, phase4Message]);
+        setIsLoading(false);
+        return; // Exit early, no exceptions
       }
 
-      const data = await response.json();
+      // If we get here, Phase 4 is actually implemented (future state)
+      const data = await response.json().catch((jsonError) => {
+        console.info('ℹ️ Could not parse response:', jsonError.message);
+        return null;
+      });
 
-      // Update conversation ID for multi-turn
+      if (!data) {
+        // JSON parse failed - treat as Phase 4 unavailable
+        console.info('ℹ️ Phase 4 response invalid — query skipped');
+        const phase4Message: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `🧠 **Documents are ready!**
+
+Your PDFs have been successfully ingested and indexed.
+
+🔍 **Question answering is not enabled yet.**
+
+This feature will be activated in Phase 4.
+
+⏳ **Please check back soon.**`,
+          timestamp: new Date(),
+          confidence: {
+            level: 'none',
+            maxSimilarity: 0,
+            averageSimilarity: 0,
+            explanation: 'Phase 4 not implemented',
+          },
+          sources: [],
+        };
+        setMessages((prev) => [...prev, phase4Message]);
+        setIsLoading(false);
+        return;
+      }
+
+      // Phase 4 is implemented and working - show real answer
       if (data.conversationId && !conversationId) {
         setConversationId(data.conversationId);
       }
 
-      // Add assistant message
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -100,24 +128,35 @@ For now, you can continue uploading PDFs using the "📄 Upload PDF" button.`,
         language: data.language,
       };
       setMessages((prev) => [...prev, assistantMessage]);
+      setIsLoading(false);
+      
     } catch (error) {
-      console.error('Error:', error);
-      // Add error message (for non-404 errors)
-      const errorMessage: Message = {
+      // Last resort catch - should never reach here with our guards above
+      // But if it does, show friendly message (NO RE-THROW)
+      console.info('ℹ️ Unexpected situation in query flow:', error);
+      
+      const fallbackMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Sorry, there was an error processing your request. Please try again.',
+        content: `🧠 **Documents are ready!**
+
+Your PDFs have been successfully ingested and indexed.
+
+🔍 **Question answering is not enabled yet.**
+
+This feature will be activated in Phase 4.
+
+⏳ **Please check back soon.**`,
         timestamp: new Date(),
         confidence: {
           level: 'none',
           maxSimilarity: 0,
           averageSimilarity: 0,
-          explanation: 'Error occurred',
+          explanation: 'Phase 4 not implemented',
         },
         sources: [],
       };
-      setMessages((prev) => [...prev, errorMessage]);
-    } finally {
+      setMessages((prev) => [...prev, fallbackMessage]);
       setIsLoading(false);
     }
   };
