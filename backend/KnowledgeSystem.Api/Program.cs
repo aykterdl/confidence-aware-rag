@@ -138,7 +138,7 @@ app.MapGet("/health", async (RagDbContext db) =>
     try
     {
         await db.Database.CanConnectAsync();
-        return Results.Ok(new { status = "healthy", database = "connected", dbname = db.Database.GetConnectionString() });
+        return Results.Ok(new { status = "healthy", database = "connected" });
     }
     catch (Exception ex)
     {
@@ -404,6 +404,86 @@ app.MapPost("/api/rag/ask", async (
         return Results.Problem($"RAG error: {ex.Message}");
     }
 });
+
+// ============================================================================
+// CLEAN ARCHITECTURE ENDPOINTS
+// ============================================================================
+
+// Document Ingestion (Clean Architecture) - POST /api/documents/ingest
+app.MapPost("/api/documents/ingest", async (
+    HttpRequest request,
+    KnowledgeSystem.Application.Services.IDocumentIngestionService ingestionService,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        // Multipart form-data kontrolü
+        if (!request.HasFormContentType)
+        {
+            return Results.BadRequest(new { error = "Request must be multipart/form-data" });
+        }
+
+        var form = await request.ReadFormAsync(cancellationToken);
+        var file = form.Files.GetFile("file");
+
+        if (file == null || file.Length == 0)
+        {
+            return Results.BadRequest(new { error = "No file uploaded. Use 'file' as the field name." });
+        }
+
+        // Sadece PDF kabul et
+        if (!file.ContentType.Contains("pdf", StringComparison.OrdinalIgnoreCase) && 
+            !file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { error = "Only PDF files are supported" });
+        }
+
+        // Dosya boyutu kontrolü (max 50MB)
+        if (file.Length > 50 * 1024 * 1024)
+        {
+            return Results.BadRequest(new { error = "File size must be less than 50MB" });
+        }
+
+        // Dosya adını başlık olarak kullan (uzantıyı kaldır)
+        var title = form["title"].FirstOrDefault() 
+            ?? System.IO.Path.GetFileNameWithoutExtension(file.FileName);
+
+        Console.WriteLine($"📄 Starting ingestion: {title} ({file.Length} bytes)");
+
+        // Clean Architecture ingestion pipeline
+        await using var stream = file.OpenReadStream();
+        var result = await ingestionService.IngestAsync(
+            stream,
+            file.FileName,
+            file.ContentType ?? "application/pdf",
+            title,
+            cancellationToken
+        );
+
+        Console.WriteLine($"✅ Ingestion completed: {result.ChunkCount} chunks created");
+
+        return Results.Ok(new
+        {
+            success = true,
+            documentId = result.DocumentId.Value.ToString(),
+            title = result.Title,
+            chunkCount = result.ChunkCount,
+            characterCount = result.CharacterCount,
+            pageCount = result.PageCount,
+            message = $"Document successfully ingested with {result.ChunkCount} semantic chunks"
+        });
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.WriteLine($"❌ Ingestion error: {ex.Message}");
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Unexpected error: {ex.Message}");
+        return Results.Problem($"Document ingestion failed: {ex.Message}");
+    }
+}).DisableAntiforgery(); // File upload için CSRF kontrolünü devre dışı bırak
 
 app.Run();
 

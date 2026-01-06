@@ -2,11 +2,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using KnowledgeSystem.Application.Interfaces;
+using KnowledgeSystem.Application.Services;
+using KnowledgeSystem.Application.Abstractions.TextExtraction;
+using KnowledgeSystem.Application.Abstractions.Chunking;
 using KnowledgeSystem.Infrastructure.Persistence;
 using KnowledgeSystem.Infrastructure.Persistence.Repositories;
 using KnowledgeSystem.Infrastructure.VectorSearch;
 using KnowledgeSystem.Infrastructure.Embedding;
 using KnowledgeSystem.Infrastructure.LanguageModel;
+using KnowledgeSystem.Infrastructure.TextExtraction;
+using KnowledgeSystem.Infrastructure.Chunking;
+using KnowledgeSystem.Infrastructure.Services;
 
 namespace KnowledgeSystem.Infrastructure.Configuration;
 
@@ -31,6 +37,15 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Register Ollama Services (Embeddings + LLM)
         services.AddOllamaServices(configuration);
+
+        // Register Text Extraction Services
+        services.AddTextExtraction();
+
+        // Register Chunking Services
+        services.AddChunking();
+
+        // Register Application Services
+        services.AddApplicationServices();
 
         return services;
     }
@@ -115,6 +130,39 @@ public static class InfrastructureServiceCollectionExtensions
             client.BaseAddress = new Uri(ollamaBaseUrl);
             client.Timeout = TimeSpan.FromSeconds(llmTimeoutSeconds);
         });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Register Text Extraction services
+    /// </summary>
+    private static IServiceCollection AddTextExtraction(this IServiceCollection services)
+    {
+        // Register PDF text extractor
+        services.AddScoped<ITextExtractor, PdfTextExtractor>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Register Chunking services
+    /// </summary>
+    private static IServiceCollection AddChunking(this IServiceCollection services)
+    {
+        // Register semantic chunking strategy
+        services.AddScoped<IChunkingStrategy, SemanticChunkingStrategy>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Register Application-level services
+    /// </summary>
+    private static IServiceCollection AddApplicationServices(this IServiceCollection services)
+    {
+        // Register document ingestion service (orchestrates full pipeline)
+        services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
 
         return services;
     }

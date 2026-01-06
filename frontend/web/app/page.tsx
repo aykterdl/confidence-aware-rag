@@ -35,8 +35,51 @@ export default function Home() {
         }),
       });
 
+      // PHASE 4 GUARD: Check if query endpoint is not available yet
       if (!response.ok) {
-        throw new Error('Failed to get response');
+        const errorData = await response.json().catch(() => ({}));
+        
+        // If backend returns 404 or endpoint not found, show Phase 4 unavailable message
+        if (response.status === 404 || 
+            errorData.error?.includes('not found') ||
+            errorData.details?.includes('not found')) {
+          
+          console.log('ℹ️ Phase 4 (Query/Retrieval) not yet implemented');
+          
+          const phase4Message: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: `🧠 **Document Ingestion Complete!**
+
+Your documents have been successfully ingested and stored with semantic chunks and embeddings.
+
+🔍 **Question Answering Coming Soon**
+
+The query and retrieval system (Phase 4) is not yet implemented. This includes:
+- Vector similarity search
+- Context assembly
+- LLM-based answer generation
+
+⏳ **What's Next?**
+
+Phase 4 will enable you to ask questions and receive AI-generated answers based on your uploaded documents.
+
+For now, you can continue uploading PDFs using the "📄 Upload PDF" button.`,
+            timestamp: new Date(),
+            confidence: {
+              level: 'none',
+              maxSimilarity: 0,
+              averageSimilarity: 0,
+              explanation: 'Phase 4 not implemented',
+            },
+            sources: [],
+          };
+          setMessages((prev) => [...prev, phase4Message]);
+          return; // Exit early, don't throw error
+        }
+        
+        // For other errors, throw to be caught below
+        throw new Error(errorData.error || 'Failed to get response');
       }
 
       const data = await response.json();
@@ -59,7 +102,7 @@ export default function Home() {
       setMessages((prev) => [...prev, assistantMessage]);
     } catch (error) {
       console.error('Error:', error);
-      // Add error message
+      // Add error message (for non-404 errors)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',

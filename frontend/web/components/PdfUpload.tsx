@@ -4,9 +4,11 @@ import { useState } from 'react';
 
 interface UploadResult {
   success: boolean;
-  documentTitle: string;
+  documentId: string;
+  title: string;
   chunkCount: number;
-  extractedTextLength: number;
+  characterCount: number;
+  pageCount?: number;
   message: string;
 }
 
@@ -71,8 +73,8 @@ export function PdfUpload() {
       setTimeout(() => setProgressMessage('Creating chunks...'), 5000);
       setTimeout(() => setProgressMessage('Generating embeddings (this may take several minutes)...'), 10000);
 
-      // Direct backend call (bypassing Next.js API route to avoid timeout)
-      const response = await fetch('http://localhost:8080/api/ingest/pdf', {
+      // Direct backend call to Clean Architecture ingestion endpoint
+      const response = await fetch('http://localhost:8080/api/documents/ingest', {
         method: 'POST',
         body: formData,
         mode: 'cors', // Enable CORS
@@ -93,9 +95,10 @@ export function PdfUpload() {
       
       console.log('✅ [PDF Upload] Success!', {
         documentId: data.documentId,
-        documentTitle: data.documentTitle,
+        title: data.title,
         chunkCount: data.chunkCount,
-        extractedTextLength: data.extractedTextLength
+        characterCount: data.characterCount,
+        pageCount: data.pageCount
       });
 
       setProgress(100);
@@ -281,7 +284,7 @@ export function PdfUpload() {
                 <div className="text-xs text-green-800 space-y-1">
                   <p>
                     <span className="font-medium">Document:</span>{' '}
-                    {result.documentTitle}
+                    {result.title}
                   </p>
                   <p>
                     <span className="font-medium">Chunks Created:</span>{' '}
@@ -289,7 +292,16 @@ export function PdfUpload() {
                   </p>
                   <p>
                     <span className="font-medium">Text Extracted:</span>{' '}
-                    {result.extractedTextLength.toLocaleString()} characters
+                    {result.characterCount.toLocaleString()} characters
+                  </p>
+                  {result.pageCount && (
+                    <p>
+                      <span className="font-medium">Pages:</span>{' '}
+                      {result.pageCount}
+                    </p>
+                  )}
+                  <p className="text-green-700 font-medium mt-2">
+                    {result.message}
                   </p>
                 </div>
               </div>
