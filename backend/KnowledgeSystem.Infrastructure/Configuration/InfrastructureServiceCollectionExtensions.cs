@@ -163,6 +163,14 @@ public static class InfrastructureServiceCollectionExtensions
     {
         // Register document ingestion service (orchestrates full pipeline)
         services.AddScoped<IDocumentIngestionService, DocumentIngestionService>();
+        
+        // Register use case handlers (Phase 4)
+        services.AddScoped<KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchHandler>();
+        services.AddScoped<KnowledgeSystem.Application.UseCases.Prompting.ComposePromptHandler>();
+        services.AddScoped<KnowledgeSystem.Application.UseCases.GenerateAnswer.GenerateAnswerHandler>();
+        
+        // Register ConfidencePolicy as singleton (Domain value object with default policy)
+        services.AddSingleton(KnowledgeSystem.Domain.ValueObjects.ConfidencePolicy.Default);
 
         return services;
     }

@@ -45,24 +45,24 @@ public sealed class OllamaLanguageModel : ILanguageModel
     }
 
     /// <summary>
-    /// Generate an answer based on context and question
-    /// Combines system prompt, context, and question into a single prompt
+    /// Generate text using Ollama language model with system and user prompts.
+    /// This matches the standard LLM invocation pattern (ChatGPT, Claude, Llama).
     /// </summary>
-    public async Task<string> GenerateAnswerAsync(
-        string question,
-        string context,
-        string? systemPrompt = null,
+    public async Task<string> GenerateAsync(
+        string systemPrompt,
+        string userPrompt,
         CancellationToken cancellationToken = default)
     {
         // Validation
-        if (string.IsNullOrWhiteSpace(question))
-            throw new ArgumentException("Question cannot be null or empty", nameof(question));
+        if (string.IsNullOrWhiteSpace(systemPrompt))
+            throw new ArgumentException("System prompt cannot be null or empty", nameof(systemPrompt));
 
-        if (string.IsNullOrWhiteSpace(context))
-            throw new ArgumentException("Context cannot be null or empty", nameof(context));
+        if (string.IsNullOrWhiteSpace(userPrompt))
+            throw new ArgumentException("User prompt cannot be null or empty", nameof(userPrompt));
 
-        // Build final prompt (system instructions + context + question)
-        var finalPrompt = BuildPrompt(systemPrompt, context, question);
+        // Build final prompt (combine system + user prompts for Ollama)
+        // Note: Ollama doesn't have separate system/user roles, so we combine them
+        var finalPrompt = BuildPrompt(systemPrompt, userPrompt);
 
         // Prepare Ollama API request
         var request = new OllamaGenerateRequest
@@ -137,32 +137,26 @@ public sealed class OllamaLanguageModel : ILanguageModel
     // ============================================================================
 
     /// <summary>
-    /// Combine system prompt, context, and question into final prompt
-    /// This is a simple template - the semantic strategy lives in Application layer
+    /// Combine system prompt and user prompt into final prompt for Ollama.
+    /// 
+    /// NOTE: Ollama's /api/generate endpoint doesn't have separate system/user role support
+    /// like ChatGPT. We concatenate them into a single prompt.
+    /// 
+    /// The actual prompt structure (with context, instructions, etc.) is defined
+    /// in the Application layer (ComposePromptHandler).
     /// </summary>
-    private static string BuildPrompt(string? systemPrompt, string context, string question)
+    private static string BuildPrompt(string systemPrompt, string userPrompt)
     {
         var promptBuilder = new System.Text.StringBuilder();
 
-        // Add system instructions if provided
-        if (!string.IsNullOrWhiteSpace(systemPrompt))
-        {
-            promptBuilder.AppendLine(systemPrompt);
-            promptBuilder.AppendLine();
-        }
-
-        // Add context
-        promptBuilder.AppendLine("Context:");
-        promptBuilder.AppendLine(context);
+        // System instructions (behavior, guardrails, strategy)
+        promptBuilder.AppendLine(systemPrompt);
+        promptBuilder.AppendLine();
+        promptBuilder.AppendLine("---");
         promptBuilder.AppendLine();
 
-        // Add question
-        promptBuilder.AppendLine("Question:");
-        promptBuilder.AppendLine(question);
-        promptBuilder.AppendLine();
-
-        // Explicit instruction to answer
-        promptBuilder.AppendLine("Answer:");
+        // User prompt (query + context + task)
+        promptBuilder.AppendLine(userPrompt);
 
         return promptBuilder.ToString();
     }

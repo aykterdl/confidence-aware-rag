@@ -52,10 +52,12 @@ public sealed class PgVectorSearchEngine : IVectorSearchEngine
         // We convert distance to similarity: similarity = 1 - (distance / 2)
         // This gives us a 0-1 range where 1 = identical, 0 = opposite
         var results = await _context.Sections
+            .Include(s => s.Document) // Eagerly load document for title metadata
             .Where(s => s.Embedding != null) // Only search sections with embeddings
             .Select(s => new
             {
                 Section = s,
+                DocumentTitle = s.Document.Title, // Extract document title for metadata
                 Distance = s.Embedding!.CosineDistance(queryVector) // Server-side calculation
             })
             .OrderBy(x => x.Distance) // Order by distance (lowest first = most similar)
@@ -70,7 +72,9 @@ public sealed class PgVectorSearchEngine : IVectorSearchEngine
             {
                 Section = MapToDomain(x.Section),
                 SimilarityScore = ConvertDistanceToSimilarity(x.Distance),
-                DocumentId = DocumentId.From(x.Section.DocumentId)
+                DocumentId = DocumentId.From(x.Section.DocumentId),
+                DocumentTitle = x.DocumentTitle,
+                SourcePageNumbers = null // Page metadata not yet implemented in persistence layer
             })
             .ToList()
             .AsReadOnly();

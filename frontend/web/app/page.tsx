@@ -21,142 +21,111 @@ export default function Home() {
     };
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
-
-    // PHASE 4 GUARD: Hard guard to prevent any exceptions
-    // Phase 4 (Query/Retrieval/RAG) is not yet implemented
-    // Show friendly message instead of attempting backend call
     
     try {
-      const response = await fetch('/api/rag/ask', {
+      console.log('🔍 Sending question to RAG system:', question);
+      
+      const response = await fetch('http://localhost:8080/api/query/answer', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          question,
-          conversationId,
+          query: question,
           topK: 5,
+          documentId: null,
+          language: null,
         }),
-      }).catch((fetchError) => {
-        // Network error or connection refused - Phase 4 not available
-        console.info('ℹ️ Phase 4 (Query/Retrieval) not yet implemented - fetch failed:', fetchError.message);
-        return null;
+        mode: 'cors',
       });
 
-      // If fetch failed or response is not OK, show Phase 4 message (NO EXCEPTIONS)
-      if (!response || !response.ok) {
-        console.info('ℹ️ Phase 4 not implemented yet — query skipped');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('❌ RAG query failed:', response.status, errorData);
         
-        const phase4Message: Message = {
+        // Show error message to user
+        const errorMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: `🧠 **Documents are ready!**
-
-Your PDFs have been successfully ingested and indexed.
-
-🔍 **Question answering is not enabled yet.**
-
-This feature will be activated in Phase 4, which includes:
-- Vector similarity search
-- Context assembly from your documents
-- AI-powered answer generation
-
-⏳ **Please check back soon.**
-
-For now, you can continue uploading documents using the "📄 Upload PDF" button.`,
+          content: `Sorry, I encountered an error while processing your question:\n\n${errorData.error || 'Unknown error'}\n\nPlease make sure:\n- Documents have been uploaded\n- The backend service is running\n- Ollama is running with the required models`,
           timestamp: new Date(),
           confidence: {
             level: 'none',
             maxSimilarity: 0,
             averageSimilarity: 0,
-            explanation: 'Phase 4 not implemented',
+            explanation: 'Error occurred',
           },
           sources: [],
         };
-        setMessages((prev) => [...prev, phase4Message]);
-        setIsLoading(false);
-        return; // Exit early, no exceptions
-      }
-
-      // If we get here, Phase 4 is actually implemented (future state)
-      const data = await response.json().catch((jsonError) => {
-        console.info('ℹ️ Could not parse response:', jsonError.message);
-        return null;
-      });
-
-      if (!data) {
-        // JSON parse failed - treat as Phase 4 unavailable
-        console.info('ℹ️ Phase 4 response invalid — query skipped');
-        const phase4Message: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `🧠 **Documents are ready!**
-
-Your PDFs have been successfully ingested and indexed.
-
-🔍 **Question answering is not enabled yet.**
-
-This feature will be activated in Phase 4.
-
-⏳ **Please check back soon.**`,
-          timestamp: new Date(),
-          confidence: {
-            level: 'none',
-            maxSimilarity: 0,
-            averageSimilarity: 0,
-            explanation: 'Phase 4 not implemented',
-          },
-          sources: [],
-        };
-        setMessages((prev) => [...prev, phase4Message]);
+        setMessages((prev) => [...prev, errorMessage]);
         setIsLoading(false);
         return;
       }
 
-      // Phase 4 is implemented and working - show real answer
-      if (data.conversationId && !conversationId) {
-        setConversationId(data.conversationId);
-      }
+      const data = await response.json();
+      console.log('✅ RAG response received:', {
+        confidence: data.confidence,
+        sourceCount: data.sourceCount,
+        llmInvoked: data.llmInvoked
+      });
 
+      // Map confidence string to Message confidence object
+      const confidenceLevel = data.confidence as 'high' | 'low' | 'none';
+      
+      // Calculate average similarity with defensive guards
+      const validScores = data.sources?.filter((s: any) => typeof s.similarityScore === 'number') || [];
+      const averageSimilarity = validScores.length > 0
+        ? validScores.reduce((sum: number, s: any) => sum + s.similarityScore, 0) / validScores.length
+        : 0;
+      
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: data.answer,
         timestamp: new Date(),
-        confidence: data.confidence,
-        sources: data.sources,
-        language: data.language,
+        confidence: {
+          level: confidenceLevel,
+          maxSimilarity: data.sources?.[0]?.similarityScore || 0,
+          averageSimilarity: averageSimilarity,
+          explanation: data.confidenceExplanation || '',
+        },
+        sources: data.sources?.map((source: any, idx: number) => ({
+          chunkId: source.chunkId || `fallback-chunk-${Date.now()}-${idx}`,  // Unique fallback key
+          documentId: source.documentId || `fallback-doc-${Date.now()}-${idx}`,  // Unique fallback key
+          documentTitle: source.documentTitle || 'Unknown Document',
+          content: source.content || '',
+          similarityScore: source.similarityScore,  // Can be undefined - defensive rendering in SourcesPanel
+          sectionType: source.sectionType,
+          articleNumber: source.articleNumber,
+          articleTitle: source.articleTitle,
+        })) || [],
       };
+      
       setMessages((prev) => [...prev, assistantMessage]);
       setIsLoading(false);
       
-    } catch (error) {
-      // Last resort catch - should never reach here with our guards above
-      // But if it does, show friendly message (NO RE-THROW)
-      console.info('ℹ️ Unexpected situation in query flow:', error);
+    } catch (error: any) {
+      console.error('❌ Unexpected error in RAG query:', error);
       
-      const fallbackMessage: Message = {
+      const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `🧠 **Documents are ready!**
-
-Your PDFs have been successfully ingested and indexed.
-
-🔍 **Question answering is not enabled yet.**
-
-This feature will be activated in Phase 4.
-
-⏳ **Please check back soon.**`,
+        content: `I encountered an unexpected error. This could mean:\n\n` +
+                 `- The backend service is not running\n` +
+                 `- Ollama is not accessible\n` +
+                 `- No documents have been uploaded yet\n\n` +
+                 `Technical details: ${error.message || 'Unknown error'}\n\n` +
+                 `Please check the console for more information.`,
         timestamp: new Date(),
         confidence: {
           level: 'none',
           maxSimilarity: 0,
           averageSimilarity: 0,
-          explanation: 'Phase 4 not implemented',
+          explanation: 'Service unavailable',
         },
         sources: [],
       };
-      setMessages((prev) => [...prev, fallbackMessage]);
+      setMessages((prev) => [...prev, errorMessage]);
       setIsLoading(false);
     }
   };

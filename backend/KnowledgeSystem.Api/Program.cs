@@ -485,6 +485,155 @@ app.MapPost("/api/documents/ingest", async (
     }
 }).DisableAntiforgery(); // File upload için CSRF kontrolünü devre dışı bırak
 
+// Semantic Search (Clean Architecture - Phase 4 Step 1) - POST /api/query/semantic-search
+app.MapPost("/api/query/semantic-search", async (
+    SemanticSearchRequest request,
+    KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchHandler handler,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        // Validation
+        if (string.IsNullOrWhiteSpace(request.Query))
+        {
+            return Results.BadRequest(new { error = "Query cannot be empty" });
+        }
+
+        if (request.TopK is < 1 or > 50)
+        {
+            return Results.BadRequest(new { error = "TopK must be between 1 and 50" });
+        }
+
+        var query = new KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchQuery
+        {
+            Query = request.Query,
+            TopK = request.TopK ?? 5,
+            DocumentId = request.DocumentId
+        };
+
+        Console.WriteLine($"🔍 Semantic search: \"{query.Query}\" (topK={query.TopK})");
+
+        var result = await handler.HandleAsync(query, cancellationToken);
+
+        Console.WriteLine($"✅ Search completed: {result.TotalMatches} matches found");
+
+        return Results.Ok(new
+        {
+            query = result.Query,
+            totalMatches = result.TotalMatches,
+            results = result.Results.Select(r => new
+            {
+                chunkId = r.ChunkId,
+                documentId = r.DocumentId,
+                documentTitle = r.DocumentTitle,
+                content = r.Content,
+                similarityScore = r.SimilarityScore,
+                sourcePageNumbers = r.SourcePageNumbers,
+                sectionType = r.SectionType,
+                articleNumber = r.ArticleNumber,
+                articleTitle = r.ArticleTitle
+            })
+        });
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.WriteLine($"❌ Search error: {ex.Message}");
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Unexpected search error: {ex.Message}");
+        return Results.Problem($"Semantic search failed: {ex.Message}");
+    }
+});
+
+// Unified Answer Endpoint (Clean Architecture - Phase 4 Step 3) - POST /api/query/answer
+app.MapPost("/api/query/answer", async (
+    AnswerQueryRequest request,
+    KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchHandler searchHandler,
+    KnowledgeSystem.Application.UseCases.Prompting.ComposePromptHandler promptHandler,
+    KnowledgeSystem.Application.UseCases.GenerateAnswer.GenerateAnswerHandler answerHandler,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        // Validation
+        if (string.IsNullOrWhiteSpace(request.Query))
+        {
+            return Results.BadRequest(new { error = "Query cannot be empty" });
+        }
+
+        if (request.TopK is < 1 or > 50)
+        {
+            return Results.BadRequest(new { error = "TopK must be between 1 and 50" });
+        }
+
+        Console.WriteLine($"💬 RAG Question: \"{request.Query}\" (topK={request.TopK ?? 5})");
+
+        // STEP 1: Semantic Search (retrieve relevant chunks)
+        var searchQuery = new KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchQuery
+        {
+            Query = request.Query,
+            TopK = request.TopK ?? 5,
+            DocumentId = request.DocumentId
+        };
+
+        var searchResult = await searchHandler.HandleAsync(searchQuery, cancellationToken);
+        Console.WriteLine($"  ✓ Retrieved {searchResult.TotalMatches} relevant chunks");
+
+        // STEP 2: Compose Prompt (build structured LLM prompt)
+        var composeCommand = new KnowledgeSystem.Application.UseCases.Prompting.ComposePromptCommand
+        {
+            Query = request.Query,
+            RetrievedChunks = searchResult.Results,
+            Language = request.Language
+        };
+
+        var composedPrompt = promptHandler.Handle(composeCommand);
+        Console.WriteLine($"  ✓ Prompt composed ({composedPrompt.SourceCount} sources, {composedPrompt.EstimatedTokenCount} tokens)");
+
+        // STEP 3: Generate Answer (invoke LLM with composed prompt)
+        var generateCommand = new KnowledgeSystem.Application.UseCases.GenerateAnswer.GenerateAnswerCommand
+        {
+            Prompt = composedPrompt
+        };
+
+        var answerResult = await answerHandler.HandleAsync(generateCommand, cancellationToken);
+        Console.WriteLine($"  ✓ Answer generated (confidence: {answerResult.ConfidenceLevel}, LLM invoked: {answerResult.LlmInvoked})");
+
+        // Return structured response
+        return Results.Ok(new
+        {
+            answer = answerResult.Answer,
+            sources = answerResult.Sources.Select(s => new
+            {
+                chunkId = s.ChunkId.ToString(),
+                documentId = s.DocumentId.ToString(),
+                documentTitle = s.DocumentTitle,
+                content = s.Content,
+                similarityScore = s.SimilarityScore,
+                sectionType = s.SectionType,
+                articleNumber = s.ArticleNumber,
+                articleTitle = s.ArticleTitle
+            }),
+            confidence = answerResult.ConfidenceLevel.ToString().ToLower(),
+            confidenceExplanation = answerResult.ConfidenceExplanation,
+            sourceCount = answerResult.SourceCount,
+            llmInvoked = answerResult.LlmInvoked
+        });
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.WriteLine($"❌ Answer generation error: {ex.Message}");
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Unexpected error: {ex.Message}");
+        return Results.Problem($"Answer generation failed: {ex.Message}");
+    }
+});
+
 app.Run();
 
 // ============================================================================
@@ -494,3 +643,5 @@ record TestEmbeddingRequest(string Text);
 record TestChunkingRequest(string Text, int? MaxChunkSize, int? Overlap);
 record IngestTextRequest(string Text, string Title, string? Metadata);
 record SearchRequest(string Query, int? TopK, double? SimilarityThreshold);
+record SemanticSearchRequest(string Query, int? TopK, string? DocumentId);
+record AnswerQueryRequest(string Query, int? TopK, string? DocumentId, string? Language);

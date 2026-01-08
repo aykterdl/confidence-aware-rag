@@ -9,9 +9,11 @@ export interface Source {
   chunkId: string;
   documentId: string;
   documentTitle: string;
-  chunkIndex: number;
-  similarityScore: number;
-  contentPreview: string;
+  content: string;
+  similarityScore?: number;  // Optional - may be undefined in low confidence scenarios
+  sectionType?: string;
+  articleNumber?: string;
+  articleTitle?: string;
 }
 
 export interface Message {

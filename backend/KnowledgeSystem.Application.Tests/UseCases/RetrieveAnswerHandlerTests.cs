@@ -47,7 +47,8 @@ public class RetrieveAnswerHandlerTests
             {
                 Section = ContentSection.CreateGeneric(documentId, 0, "Low relevance content"),
                 SimilarityScore = 0.02, // Below MinAcceptableThreshold (0.04)
-                DocumentId = documentId
+                DocumentId = documentId,
+                DocumentTitle = "Test Document"
             }
         };
 
@@ -96,7 +97,8 @@ public class RetrieveAnswerHandlerTests
             {
                 Section = section,
                 SimilarityScore = 0.15, // Above LowConfidenceThreshold (0.06) → High confidence
-                DocumentId = documentId
+                DocumentId = documentId,
+                DocumentTitle = "Test Document"
             }
         };
 
@@ -156,7 +158,8 @@ public class RetrieveAnswerHandlerTests
             {
                 Section = section,
                 SimilarityScore = 0.05, // Between MinAcceptable (0.04) and Low (0.06) → Low confidence
-                DocumentId = documentId
+                DocumentId = documentId,
+                DocumentTitle = "Test Document"
             }
         };
 
@@ -288,13 +291,15 @@ public class RetrieveAnswerHandlerTests
             {
                 Section = section1,
                 SimilarityScore = 0.10,
-                DocumentId = documentId
+                DocumentId = documentId,
+                DocumentTitle = "Test Document"
             },
             new()
             {
                 Section = section2,
                 SimilarityScore = 0.08,
-                DocumentId = documentId
+                DocumentId = documentId,
+                DocumentTitle = "Test Document"
             }
         };
 

@@ -4,13 +4,23 @@ using KnowledgeSystem.Domain.ValueObjects;
 namespace KnowledgeSystem.Application.Interfaces;
 
 /// <summary>
-/// Search result containing section and similarity score
+/// Search result containing section, similarity score, and document metadata
 /// </summary>
 public sealed class SectionSearchResult
 {
     public required ContentSection Section { get; init; }
     public required double SimilarityScore { get; init; } // 0-1 range (cosine similarity)
     public required DocumentId DocumentId { get; init; }
+    
+    /// <summary>
+    /// Title of the source document (for API/UI display)
+    /// </summary>
+    public required string DocumentTitle { get; init; }
+    
+    /// <summary>
+    /// Page numbers where this section appears (if available from metadata)
+    /// </summary>
+    public IReadOnlyList<int>? SourcePageNumbers { get; init; }
 }
 
 /// <summary>

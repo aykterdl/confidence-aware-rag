@@ -74,10 +74,11 @@ public sealed class RetrieveAnswerHandler
 
         // STEP 7: Generate answer via LLM (mode based on confidence)
         var systemPrompt = BuildSystemPrompt(confidenceScore);
-        var answer = await _languageModel.GenerateAnswerAsync(
-            query.Question,
-            context,
+        var userPrompt = $"USER QUESTION:\n{query.Question}\n\nCONTEXT:\n{context}\n\nINSTRUCTIONS:\n- Answer the question using the context above\n- If the answer is not fully supported, state the limitation\n- Do not reference information outside the provided context";
+        
+        var answer = await _languageModel.GenerateAsync(
             systemPrompt,
+            userPrompt,
             cancellationToken);
 
         // STEP 8: Return result

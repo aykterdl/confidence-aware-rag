@@ -52,9 +52,11 @@ export function SourcesPanel({ sources }: SourcesPanelProps) {
       <div className="space-y-2">
         {sources.map((source, index) => {
           const isExpanded = expandedSources.has(source.chunkId);
+          // Use combination of chunkId and index for guaranteed uniqueness
+          const uniqueKey = `${source.chunkId}-${index}`;
           return (
             <div
-              key={source.chunkId}
+              key={uniqueKey}
               className="bg-slate-50 border border-slate-200 rounded-lg overflow-hidden"
             >
               {/* Source Header - Always Visible */}
@@ -69,13 +71,17 @@ export function SourcesPanel({ sources }: SourcesPanelProps) {
                   <span className="text-sm font-medium text-slate-800 truncate">
                     {source.documentTitle}
                   </span>
-                  <span className="text-xs text-slate-500">
-                    Chunk {source.chunkIndex}
-                  </span>
+                  {source.articleNumber && (
+                    <span className="text-xs text-slate-500">
+                      Article {source.articleNumber}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="text-xs font-mono text-slate-600 bg-slate-200 px-2 py-0.5 rounded">
-                    {source.similarityScore.toFixed(4)}
+                    {typeof source.similarityScore === 'number' 
+                      ? source.similarityScore.toFixed(4)
+                      : 'N/A'}
                   </span>
                   <svg
                     className={`w-4 h-4 text-slate-600 transition-transform ${
@@ -99,13 +105,21 @@ export function SourcesPanel({ sources }: SourcesPanelProps) {
               {isExpanded && (
                 <div className="px-3 py-2 border-t border-slate-200 bg-white">
                   <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
-                    {source.contentPreview}
+                    {source.content}
                   </p>
+                  {source.articleTitle && (
+                    <div className="mt-2 text-xs font-medium text-slate-600">
+                      {source.articleTitle}
+                    </div>
+                  )}
                   <div className="mt-2 flex items-center space-x-3 text-xs text-slate-500">
                     <span title="Chunk ID">ID: {source.chunkId.slice(0, 8)}...</span>
                     <span title="Document ID">
                       Doc: {source.documentId.slice(0, 8)}...
                     </span>
+                    {source.sectionType && (
+                      <span title="Section Type">Type: {source.sectionType}</span>
+                    )}
                   </div>
                 </div>
               )}
