@@ -1,15 +1,48 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '@/components/ChatMessage';
 import { ChatInput } from '@/components/ChatInput';
 import { PdfUpload } from '@/components/PdfUpload';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import type { Message } from '@/types';
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [userHasScrolled, setUserHasScrolled] = useState(false);
+
+  // Auto-scroll to bottom when new messages arrive or while typing
+  useEffect(() => {
+    // Only auto-scroll if user hasn't manually scrolled up
+    if (!userHasScrolled) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, userHasScrolled]);
+
+  // Detect if user has scrolled manually
+  useEffect(() => {
+    const chatContainer = chatContainerRef.current;
+    if (!chatContainer) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = chatContainer;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      
+      // If user is near bottom, resume auto-scroll
+      if (isNearBottom) {
+        setUserHasScrolled(false);
+      } else {
+        setUserHasScrolled(true);
+      }
+    };
+
+    chatContainer.addEventListener('scroll', handleScroll);
+    return () => chatContainer.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleSendMessage = async (question: string) => {
     // Add user message immediately
@@ -138,27 +171,28 @@ export default function Home() {
   const [showUpload, setShowUpload] = useState(false);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 shadow-sm">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">RAG Demo</h1>
-            <p className="text-sm text-slate-600">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">RAG Demo</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
               Retrieval Augmented Generation System
             </p>
           </div>
           <div className="flex items-center space-x-2">
+            <ThemeToggle />
             <button
               onClick={() => setShowUpload(!showUpload)}
-              className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
             >
               {showUpload ? 'Hide Upload' : '📄 Upload PDF'}
             </button>
             {messages.length > 0 && (
               <button
                 onClick={handleNewConversation}
-                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
               >
                 New Conversation
               </button>
@@ -168,7 +202,7 @@ export default function Home() {
       </header>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
         <div className="max-w-5xl mx-auto px-4 py-8">
           {/* PDF Upload Panel */}
           {showUpload && (
@@ -178,9 +212,9 @@ export default function Home() {
           )}
           {messages.length === 0 ? (
             <div className="text-center py-16">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-full mb-4">
                 <svg
-                  className="w-8 h-8 text-blue-600"
+                  className="w-8 h-8 text-blue-600 dark:text-blue-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -193,10 +227,10 @@ export default function Home() {
                   />
                 </svg>
               </div>
-              <h2 className="text-xl font-semibold text-slate-900 mb-2">
+              <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
                 Ask a Question
               </h2>
-              <p className="text-slate-600">
+              <p className="text-slate-600 dark:text-slate-400">
                 Start a conversation with the RAG system
               </p>
             </div>
@@ -206,30 +240,32 @@ export default function Home() {
                 <ChatMessage key={message.id} message={message} />
               ))}
               {isLoading && (
-                <div className="flex items-center space-x-2 text-slate-600">
-                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
+                <div className="flex items-center space-x-2 text-slate-600 dark:text-slate-400">
+                  <div className="w-2 h-2 bg-blue-600 dark:bg-blue-500 rounded-full animate-bounce" />
                   <div
-                    className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
+                    className="w-2 h-2 bg-blue-600 dark:bg-blue-500 rounded-full animate-bounce"
                     style={{ animationDelay: '0.1s' }}
                   />
                   <div
-                    className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
+                    className="w-2 h-2 bg-blue-600 dark:bg-blue-500 rounded-full animate-bounce"
                     style={{ animationDelay: '0.2s' }}
                   />
                   <span className="text-sm ml-2">Thinking...</span>
                 </div>
               )}
+              {/* Scroll anchor */}
+              <div ref={messagesEndRef} />
             </div>
           )}
         </div>
       </div>
 
       {/* Input Area */}
-      <div className="bg-white border-t border-slate-200 shadow-lg">
+      <div className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 shadow-lg">
         <div className="max-w-5xl mx-auto px-4 py-4">
           <ChatInput onSend={handleSendMessage} disabled={isLoading} />
           {conversationId && (
-            <div className="mt-2 text-xs text-slate-500 text-center">
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 text-center">
               Conversation active • ID: {conversationId.slice(0, 8)}...
             </div>
           )}

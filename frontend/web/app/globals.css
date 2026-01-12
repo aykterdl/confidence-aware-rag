@@ -1,5 +1,59 @@
 @import "tailwindcss";
 
+:root {
+  /* Light mode colors */
+  --color-bg-primary: 249 250 251; /* gray-50 */
+  --color-bg-secondary: 255 255 255; /* white */
+  --color-bg-tertiary: 248 250 252; /* slate-50 */
+  --color-text-primary: 15 23 42; /* slate-900 */
+  --color-text-secondary: 51 65 85; /* slate-700 */
+  --color-text-tertiary: 100 116 139; /* slate-500 */
+  --color-border: 226 232 240; /* slate-200 */
+  --color-border-hover: 203 213 225; /* slate-300 */
+  --color-accent: 37 99 235; /* blue-600 */
+  --color-accent-hover: 29 78 216; /* blue-700 */
+  --color-success: 22 163 74; /* green-600 */
+  --color-warning: 234 179 8; /* yellow-500 */
+  --color-error: 220 38 38; /* red-600 */
+  --color-info: 14 165 233; /* sky-500 */
+  
+  /* Confidence colors */
+  --color-confidence-high: 22 163 74; /* green-600 */
+  --color-confidence-low: 234 179 8; /* yellow-600 */
+  --color-confidence-none: 100 116 139; /* slate-500 */
+  
+  /* Source card colors */
+  --color-source-bg: 248 250 252; /* slate-50 */
+  --color-source-border: 226 232 240; /* slate-200 */
+  --color-source-hover: 241 245 249; /* slate-100 */
+}
+
+[data-theme="dark"] {
+  /* Dark mode colors */
+  --color-bg-primary: 15 23 42; /* slate-900 */
+  --color-bg-secondary: 30 41 59; /* slate-800 */
+  --color-bg-tertiary: 51 65 85; /* slate-700 */
+  --color-text-primary: 248 250 252; /* slate-50 */
+  --color-text-secondary: 226 232 240; /* slate-200 */
+  --color-text-tertiary: 148 163 184; /* slate-400 */
+  --color-border: 51 65 85; /* slate-700 */
+  --color-border-hover: 71 85 105; /* slate-600 */
+  --color-accent: 59 130 246; /* blue-500 */
+  --color-accent-hover: 37 99 235; /* blue-600 */
+  --color-success: 34 197 94; /* green-500 */
+  --color-warning: 250 204 21; /* yellow-400 */
+  --color-error: 239 68 68; /* red-500 */
+  --color-info: 56 189 248; /* sky-400 */
+  
+  --color-confidence-high: 34 197 94; /* green-500 */
+  --color-confidence-low: 250 204 21; /* yellow-400 */
+  --color-confidence-none: 148 163 184; /* slate-400 */
+  
+  --color-source-bg: 30 41 59; /* slate-800 */
+  --color-source-border: 51 65 85; /* slate-700 */
+  --color-source-hover: 51 65 85; /* slate-700 */
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -8,14 +62,50 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #0f172a; /* slate-900 */
+  background-color: rgb(var(--color-bg-primary));
+  color: rgb(var(--color-text-primary));
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Input ve textarea için default renkler */
+/* Input ve textarea için theme-aware renkler */
 input, textarea {
-  color: #0f172a; /* slate-900 */
+  color: rgb(var(--color-text-primary));
+  background-color: rgb(var(--color-bg-secondary));
+  border-color: rgb(var(--color-border));
+  transition: all 0.2s ease;
 }
 
 input::placeholder, textarea::placeholder {
-  color: #94a3b8; /* slate-400 */
+  color: rgb(var(--color-text-tertiary));
+}
+
+input:focus, textarea:focus {
+  border-color: rgb(var(--color-accent));
+  outline: none;
+  ring: 2px;
+  ring-color: rgba(var(--color-accent), 0.2);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgb(var(--color-bg-tertiary));
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--color-border-hover));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--color-text-tertiary));
 }

@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using KnowledgeSystem.Application.Interfaces;
 
 namespace KnowledgeSystem.Infrastructure.LanguageModel;
@@ -28,11 +29,20 @@ public sealed class OllamaLanguageModel : ILanguageModel
 {
     private readonly HttpClient _httpClient;
     private readonly string _modelName;
+    private readonly ILogger<OllamaLanguageModel> _logger;
     private const string GenerateEndpoint = "/api/generate";
+    
+    // Safety parameters (grounded, deterministic generation)
+    private const double Temperature = 0.3; // Low temperature for factual answers
+    private const int MaxTokens = 2048; // Reasonable limit for answer length
 
-    public OllamaLanguageModel(HttpClient httpClient, IConfiguration configuration)
+    public OllamaLanguageModel(
+        HttpClient httpClient,
+        IConfiguration configuration,
+        ILogger<OllamaLanguageModel> logger)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
         if (configuration == null)
             throw new ArgumentNullException(nameof(configuration));
@@ -42,6 +52,10 @@ public sealed class OllamaLanguageModel : ILanguageModel
             ?? throw new InvalidOperationException(
                 "Ollama language model name not found in configuration. " +
                 "Please set 'Ollama:LanguageModel:Model' in appsettings.json");
+                
+        _logger.LogInformation(
+            "OllamaLanguageModel initialized: Model={ModelName}, Temperature={Temperature}, MaxTokens={MaxTokens}",
+            _modelName, Temperature, MaxTokens);
     }
 
     /// <summary>
@@ -69,8 +83,14 @@ public sealed class OllamaLanguageModel : ILanguageModel
         {
             Model = _modelName,
             Prompt = finalPrompt,
-            Stream = false // Single response (no streaming)
+            Stream = false, // Single response (no streaming)
+            Temperature = Temperature, // Grounded, deterministic
+            NumPredict = MaxTokens // Limit response length
         };
+
+        _logger.LogDebug(
+            "Sending LLM generation request: Model={Model}, PromptLength={PromptLength}, Temperature={Temperature}",
+            _modelName, finalPrompt.Length, Temperature);
 
         // Call Ollama API
         HttpResponseMessage response;
@@ -83,6 +103,9 @@ public sealed class OllamaLanguageModel : ILanguageModel
         }
         catch (HttpRequestException ex)
         {
+            _logger.LogError(ex,
+                "Failed to connect to Ollama language model service at {BaseAddress}",
+                _httpClient.BaseAddress);
             throw new InvalidOperationException(
                 $"Failed to connect to Ollama language model service. " +
                 $"Ensure Ollama is running at {_httpClient.BaseAddress}",
@@ -90,10 +113,13 @@ public sealed class OllamaLanguageModel : ILanguageModel
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogWarning(ex,
+                "Ollama language model request timed out after {Timeout}s",
+                _httpClient.Timeout.TotalSeconds);
             throw new TimeoutException(
                 "Ollama language model request timed out. " +
                 "The model might be loading, or the response is taking longer than expected. " +
-                "Consider increasing 'Ollama:TimeoutSeconds' in configuration.",
+                "Consider increasing 'Ollama:LanguageModel:TimeoutSeconds' in configuration.",
                 ex);
         }
 
@@ -101,6 +127,9 @@ public sealed class OllamaLanguageModel : ILanguageModel
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError(
+                "Ollama language model request failed: StatusCode={StatusCode}, Response={ErrorContent}",
+                response.StatusCode, errorContent);
             throw new InvalidOperationException(
                 $"Ollama language model request failed with status {response.StatusCode}. " +
                 $"Response: {errorContent}");
@@ -115,6 +144,7 @@ public sealed class OllamaLanguageModel : ILanguageModel
         }
         catch (JsonException ex)
         {
+            _logger.LogError(ex, "Failed to deserialize Ollama language model response");
             throw new InvalidOperationException(
                 "Failed to deserialize Ollama language model response. " +
                 "The response format might have changed.",
@@ -124,12 +154,18 @@ public sealed class OllamaLanguageModel : ILanguageModel
         // Validate response
         if (string.IsNullOrWhiteSpace(generateResponse?.Response))
         {
+            _logger.LogWarning("Ollama returned an empty or null response");
             throw new InvalidOperationException(
                 "Ollama returned an empty or null response. " +
                 "The model might not have generated any output.");
         }
 
-        return generateResponse.Response.Trim();
+        var trimmedResponse = generateResponse.Response.Trim();
+        _logger.LogInformation(
+            "LLM generation completed successfully: ResponseLength={Length} characters",
+            trimmedResponse.Length);
+        
+        return trimmedResponse;
     }
 
     // ============================================================================
@@ -178,6 +214,12 @@ public sealed class OllamaLanguageModel : ILanguageModel
 
         [JsonPropertyName("stream")]
         public required bool Stream { get; init; }
+        
+        [JsonPropertyName("temperature")]
+        public required double Temperature { get; init; }
+        
+        [JsonPropertyName("num_predict")]
+        public required int NumPredict { get; init; }
     }
 
     /// <summary>

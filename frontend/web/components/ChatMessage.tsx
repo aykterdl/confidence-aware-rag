@@ -1,13 +1,25 @@
 import { Message } from '@/types';
 import { ConfidenceBadge } from './ConfidenceBadge';
 import { SourcesPanel } from './SourcesPanel';
+import { useTypingEffect } from '@/hooks/useTypingEffect';
 
 interface ChatMessageProps {
   message: Message;
+  enableTyping?: boolean;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, enableTyping = true }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  
+  // Apply typing effect only to assistant messages
+  // CRITICAL: Pass message.id as stable identifier to prevent restarts
+  const { displayedText, isTyping } = useTypingEffect({
+    text: message.content,
+    messageId: message.id, // Stable identifier - prevents typing restart
+    enabled: enableTyping && !isUser,
+    speed: 3,
+    interval: 20,
+  });
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -16,8 +28,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
         <div
           className={`rounded-lg px-4 py-3 ${
             isUser
-              ? 'bg-blue-600 text-white'
-              : 'bg-white border border-slate-200 shadow-sm'
+              ? 'bg-blue-600 dark:bg-blue-700 text-white'
+              : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-sm'
           }`}
         >
           {/* User Message */}
@@ -47,9 +59,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <div className="space-y-3">
               <div className="flex items-start space-x-2">
                 <div className="flex-shrink-0">
-                  <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center">
+                  <div className="w-6 h-6 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
                     <svg
-                      className="w-4 h-4 text-slate-600"
+                      className="w-4 h-4 text-slate-600 dark:text-slate-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -64,8 +76,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
                   </div>
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm leading-relaxed text-slate-800 whitespace-pre-wrap">
-                    {message.content}
+                  <p className="text-sm leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
+                    {displayedText}
+                    {isTyping && (
+                      <span className="inline-block w-1 h-4 ml-0.5 bg-slate-800 dark:bg-slate-200 animate-pulse" />
+                    )}
                   </p>
                 </div>
               </div>

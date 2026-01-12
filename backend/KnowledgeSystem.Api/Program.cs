@@ -1,7 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using KnowledgeSystem.Api.Data;
-using KnowledgeSystem.Api.Configuration;
-using KnowledgeSystem.Api.Services;
 using KnowledgeSystem.Infrastructure.Configuration;
 using KnowledgeSystem.Infrastructure.Persistence;
 
@@ -10,73 +7,16 @@ var builder = WebApplication.CreateBuilder(args);
 // ============================================================================
 // CLEAN ARCHITECTURE INFRASTRUCTURE REGISTRATION
 // ============================================================================
-// This registers:
+// This registers all Clean Architecture components:
 // - KnowledgeDbContext (EF Core with PostgreSQL + pgvector)
 // - IDocumentRepository → DocumentRepository
 // - IVectorSearchEngine → PgVectorSearchEngine
 // - IEmbeddingGenerator → OllamaEmbeddingGenerator
 // - ILanguageModel → OllamaLanguageModel
+// - IDocumentIngestionService → DocumentIngestionService
+// - Use case handlers (SemanticSearch, ComposePrompt, GenerateAnswer)
+// - ConfidencePolicy (Domain)
 builder.Services.AddInfrastructure(builder.Configuration);
-
-// ============================================================================
-// LEGACY SERVICES (KnowledgeSystem.Api services - will be phased out)
-// ============================================================================
-// PostgreSQL + pgvector bağlantısı (legacy DbContext)
-// NOTE: Uses same connection string as Clean Architecture (KnowledgeDb)
-// Legacy context does NOT own schema or migrations
-builder.Services.AddDbContext<RagDbContext>(options =>
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("KnowledgeDb"),
-        o => o.UseVector()
-    )
-);
-
-// Ollama ayarları
-builder.Services.Configure<OllamaSettings>(
-    builder.Configuration.GetSection(OllamaSettings.SectionName)
-);
-
-// RAG Confidence ayarları
-builder.Services.Configure<RagConfidenceSettings>(
-    builder.Configuration.GetSection(RagConfidenceSettings.SectionName)
-);
-
-// Ollama HttpClient - Embedding (legacy)
-builder.Services.AddHttpClient<IOllamaEmbeddingService, OllamaEmbeddingService>((serviceProvider, client) =>
-{
-    var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<OllamaSettings>>().Value;
-    client.BaseAddress = new Uri(settings.BaseUrl);
-    client.Timeout = TimeSpan.FromSeconds(settings.TimeoutSeconds);
-});
-
-// Ollama HttpClient - LLM (legacy)
-builder.Services.AddHttpClient(nameof(IOllamaLlmService), (serviceProvider, client) =>
-{
-    var settings = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<OllamaSettings>>().Value;
-    client.BaseAddress = new Uri(settings.BaseUrl);
-    client.Timeout = TimeSpan.FromMinutes(5); // LLM generation uzun sürebilir
-});
-
-// Ollama LLM Service (legacy)
-builder.Services.AddScoped<IOllamaLlmService, OllamaLlmService>();
-
-// Text Chunking Service (legacy)
-builder.Services.AddScoped<ITextChunkingService, TextChunkingService>();
-
-// Chunk Ingestion Service (legacy)
-builder.Services.AddScoped<IChunkIngestionService, ChunkIngestionService>();
-
-// Vector Search Service (legacy)
-builder.Services.AddScoped<IVectorSearchService, VectorSearchService>();
-
-// Conversation Store (legacy - Singleton)
-builder.Services.AddSingleton<IConversationStore, InMemoryConversationStore>();
-
-// RAG Answer Service (legacy)
-builder.Services.AddScoped<IRagAnswerService, RagAnswerService>();
-
-// PDF Reader Service (legacy)
-builder.Services.AddScoped<IPdfReaderService, PdfReaderService>();
 
 // ============================================================================
 // CORE SERVICES
@@ -103,16 +43,18 @@ var app = builder.Build();
 // KnowledgeDbContext is the SINGLE source of truth for schema management
 using (var scope = app.Services.CreateScope())
 {
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    
     try
     {
         var knowledgeDb = scope.ServiceProvider.GetRequiredService<KnowledgeDbContext>();
         await knowledgeDb.Database.MigrateAsync();
         
-        Console.WriteLine("✅ Database migrations applied successfully");
+        logger.LogInformation("Database migrations applied successfully");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Failed to apply database migrations: {ex.Message}");
+        logger.LogCritical(ex, "Failed to apply database migrations");
         throw; // Fail fast - database schema issues must be resolved before startup
     }
 }
@@ -129,11 +71,11 @@ if (app.Environment.IsDevelopment())
 }
 
 // ============================================================================
-// ENDPOINTS (LEGACY - will be migrated to Clean Architecture controllers)
+// MONITORING & DEBUG ENDPOINTS
 // ============================================================================
 
 // Health check endpoint
-app.MapGet("/health", async (RagDbContext db) =>
+app.MapGet("/health", async (KnowledgeDbContext db) =>
 {
     try
     {
@@ -146,263 +88,11 @@ app.MapGet("/health", async (RagDbContext db) =>
     }
 });
 
-// Test endpoint - döküman sayısı
-app.MapGet("/api/documents/count", async (RagDbContext db) =>
+// Document count endpoint (debug/monitoring)
+app.MapGet("/api/documents/count", async (KnowledgeDbContext db) =>
 {
     var count = await db.Documents.CountAsync();
     return Results.Ok(new { totalDocuments = count });
-});
-
-// Test endpoint - embedding servisi
-app.MapPost("/api/embedding/test", async (IOllamaEmbeddingService embeddingService, TestEmbeddingRequest request) =>
-{
-    try
-    {
-        var embedding = await embeddingService.GenerateEmbeddingAsync(request.Text);
-        
-        return Results.Ok(new
-        {
-            text = request.Text,
-            embeddingLength = embedding.Length,
-            firstFiveValues = embedding.Take(5).ToArray(),
-            lastFiveValues = embedding.TakeLast(5).ToArray()
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"Error: {ex.Message}");
-    }
-});
-
-// Test endpoint - text chunking servisi
-app.MapPost("/api/chunking/test", (ITextChunkingService chunkingService, TestChunkingRequest request) =>
-{
-    try
-    {
-        var chunks = chunkingService.ChunkText(
-            request.Text,
-            request.MaxChunkSize ?? 500,
-            request.Overlap ?? 50
-        );
-
-        return Results.Ok(new
-        {
-            originalLength = request.Text.Length,
-            chunkCount = chunks.Count,
-            maxChunkSize = request.MaxChunkSize ?? 500,
-            overlap = request.Overlap ?? 50,
-            chunks = chunks.Select((chunk, index) => new
-            {
-                index = index + 1,
-                length = chunk.Length,
-                preview = chunk.Length > 50 ? chunk.Substring(0, 50) + "..." : chunk,
-                fullText = chunk
-            }).ToList()
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"Error: {ex.Message}");
-    }
-});
-
-// Ingestion endpoint - metni chunk'lara böl, embedding üret ve kaydet
-app.MapPost("/api/ingest/text", async (
-    IChunkIngestionService ingestionService,
-    IngestTextRequest request,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var result = await ingestionService.IngestTextAsync(
-            request.Text,
-            request.Title,
-            request.Metadata,
-            cancellationToken
-        );
-
-        return Results.Ok(new
-        {
-            success = true,
-            documentId = result.DocumentId,
-            documentTitle = result.DocumentTitle,
-            chunkCount = result.ChunkCount,
-            message = $"Successfully ingested document with {result.ChunkCount} chunks"
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"Ingestion error: {ex.Message}");
-    }
-});
-
-// PDF Upload endpoint - PDF dosyasından metin çıkar ve sisteme yükle
-app.MapPost("/api/ingest/pdf", async (
-    HttpRequest request,
-    IPdfReaderService pdfReader,
-    IChunkIngestionService ingestionService,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        // Multipart form-data kontrolü
-        if (!request.HasFormContentType)
-        {
-            return Results.BadRequest("Request must be multipart/form-data");
-        }
-
-        var form = await request.ReadFormAsync(cancellationToken);
-        var file = form.Files.GetFile("file");
-
-        if (file == null || file.Length == 0)
-        {
-            return Results.BadRequest("No file uploaded. Use 'file' as the field name.");
-        }
-
-        // Sadece PDF kabul et
-        if (!file.ContentType.Contains("pdf") && !file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-        {
-            return Results.BadRequest("Only PDF files are supported");
-        }
-
-        // Dosya boyutu kontrolü (max 50MB)
-        if (file.Length > 50 * 1024 * 1024)
-        {
-            return Results.BadRequest("File size must be less than 50MB");
-        }
-
-        // PDF'den metin çıkar
-        string extractedText;
-        await using (var stream = file.OpenReadStream())
-        {
-            extractedText = await pdfReader.ExtractTextAsync(stream, cancellationToken);
-        }
-
-        if (string.IsNullOrWhiteSpace(extractedText))
-        {
-            return Results.BadRequest("No text could be extracted from the PDF");
-        }
-
-        // Dosya adını başlık olarak kullan (uzantıyı kaldır)
-        var title = form["title"].FirstOrDefault() 
-            ?? System.IO.Path.GetFileNameWithoutExtension(file.FileName);
-
-        // Metadata ekle (JSON string olarak)
-        var metadata = System.Text.Json.JsonSerializer.Serialize(new
-        {
-            source = "pdf_upload",
-            original_filename = file.FileName,
-            file_size_bytes = file.Length,
-            upload_date = DateTime.UtcNow
-        });
-
-        // Sisteme yükle (chunk + embed + store)
-        var result = await ingestionService.IngestTextAsync(
-            extractedText,
-            title,
-            metadata,
-            cancellationToken
-        );
-
-        return Results.Ok(new
-        {
-            success = true,
-            documentId = result.DocumentId,
-            documentTitle = result.DocumentTitle,
-            chunkCount = result.ChunkCount,
-            extractedTextLength = extractedText.Length,
-            message = $"PDF başarıyla yüklendi: {result.ChunkCount} chunk oluşturuldu"
-        });
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.BadRequest(ex.Message);
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"PDF upload error: {ex.Message}");
-    }
-}).DisableAntiforgery(); // File upload için CSRF kontrolünü devre dışı bırak
-
-// Search endpoint - vector similarity search
-app.MapPost("/api/search", async (
-    IVectorSearchService searchService,
-    SearchRequest request,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var results = await searchService.SearchAsync(
-            request.Query,
-            request.TopK ?? 5,
-            request.SimilarityThreshold ?? 0.0,
-            cancellationToken
-        );
-
-        return Results.Ok(new
-        {
-            query = request.Query,
-            resultCount = results.Count,
-            topK = request.TopK ?? 5,
-            similarityThreshold = request.SimilarityThreshold ?? 0.0,
-            results = results.Select(r => new
-            {
-                chunkId = r.ChunkId,
-                documentId = r.DocumentId,
-                documentTitle = r.DocumentTitle,
-                chunkIndex = r.ChunkIndex,
-                content = r.Content,
-                similarityScore = Math.Round(r.SimilarityScore, 4),
-                preview = r.Content.Length > 200 ? r.Content.Substring(0, 200) + "..." : r.Content
-            }).ToList()
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"Search error: {ex.Message}");
-    }
-});
-
-// RAG Ask endpoint - Vector search + LLM answer generation
-app.MapPost("/api/rag/ask", async (
-    IRagAnswerService ragService,
-    KnowledgeSystem.Api.Models.RagRequest request,
-    CancellationToken cancellationToken) =>
-{
-    try
-    {
-        var response = await ragService.AskAsync(request, cancellationToken);
-
-        return Results.Ok(new
-        {
-            question = response.Question,
-            answer = response.Answer,
-            conversationId = response.ConversationId,
-            language = response.Language,
-            confidence = new
-            {
-                level = response.Confidence.Level,
-                maxSimilarity = response.Confidence.MaxSimilarity,
-                averageSimilarity = response.Confidence.AverageSimilarity,
-                explanation = response.Confidence.Explanation
-            },
-            sourceCount = response.SourceCount,
-            averageSimilarity = response.AverageSimilarity, // backward compatibility
-            sources = response.Sources.Select(s => new
-            {
-                chunkId = s.ChunkId,
-                documentId = s.DocumentId,
-                documentTitle = s.DocumentTitle,
-                chunkIndex = s.ChunkIndex,
-                similarityScore = Math.Round(s.SimilarityScore, 4),
-                contentPreview = s.ContentPreview
-            }).ToList()
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem($"RAG error: {ex.Message}");
-    }
 });
 
 // ============================================================================
@@ -413,6 +103,7 @@ app.MapPost("/api/rag/ask", async (
 app.MapPost("/api/documents/ingest", async (
     HttpRequest request,
     KnowledgeSystem.Application.Services.IDocumentIngestionService ingestionService,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     try
@@ -448,7 +139,9 @@ app.MapPost("/api/documents/ingest", async (
         var title = form["title"].FirstOrDefault() 
             ?? System.IO.Path.GetFileNameWithoutExtension(file.FileName);
 
-        Console.WriteLine($"📄 Starting ingestion: {title} ({file.Length} bytes)");
+        logger.LogInformation(
+            "Starting document ingestion: Title={Title}, Size={Size} bytes",
+            title, file.Length);
 
         // Clean Architecture ingestion pipeline
         await using var stream = file.OpenReadStream();
@@ -460,7 +153,9 @@ app.MapPost("/api/documents/ingest", async (
             cancellationToken
         );
 
-        Console.WriteLine($"✅ Ingestion completed: {result.ChunkCount} chunks created");
+        logger.LogInformation(
+            "Document ingestion completed successfully: DocumentId={DocumentId}, ChunkCount={ChunkCount}",
+            result.DocumentId.Value, result.ChunkCount);
 
         return Results.Ok(new
         {
@@ -475,12 +170,12 @@ app.MapPost("/api/documents/ingest", async (
     }
     catch (InvalidOperationException ex)
     {
-        Console.WriteLine($"❌ Ingestion error: {ex.Message}");
+        logger.LogWarning(ex, "Document ingestion validation error");
         return Results.BadRequest(new { error = ex.Message });
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Unexpected error: {ex.Message}");
+        logger.LogError(ex, "Unexpected error during document ingestion");
         return Results.Problem($"Document ingestion failed: {ex.Message}");
     }
 }).DisableAntiforgery(); // File upload için CSRF kontrolünü devre dışı bırak
@@ -489,6 +184,7 @@ app.MapPost("/api/documents/ingest", async (
 app.MapPost("/api/query/semantic-search", async (
     SemanticSearchRequest request,
     KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchHandler handler,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     try
@@ -511,11 +207,15 @@ app.MapPost("/api/query/semantic-search", async (
             DocumentId = request.DocumentId
         };
 
-        Console.WriteLine($"🔍 Semantic search: \"{query.Query}\" (topK={query.TopK})");
+        logger.LogInformation(
+            "Semantic search request: Query=\"{Query}\", TopK={TopK}",
+            query.Query, query.TopK);
 
         var result = await handler.HandleAsync(query, cancellationToken);
 
-        Console.WriteLine($"✅ Search completed: {result.TotalMatches} matches found");
+        logger.LogInformation(
+            "Semantic search completed: Matches={TotalMatches}",
+            result.TotalMatches);
 
         return Results.Ok(new
         {
@@ -537,12 +237,12 @@ app.MapPost("/api/query/semantic-search", async (
     }
     catch (InvalidOperationException ex)
     {
-        Console.WriteLine($"❌ Search error: {ex.Message}");
+        logger.LogWarning(ex, "Semantic search validation error");
         return Results.BadRequest(new { error = ex.Message });
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Unexpected search error: {ex.Message}");
+        logger.LogError(ex, "Unexpected error during semantic search");
         return Results.Problem($"Semantic search failed: {ex.Message}");
     }
 });
@@ -553,6 +253,7 @@ app.MapPost("/api/query/answer", async (
     KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchHandler searchHandler,
     KnowledgeSystem.Application.UseCases.Prompting.ComposePromptHandler promptHandler,
     KnowledgeSystem.Application.UseCases.GenerateAnswer.GenerateAnswerHandler answerHandler,
+    ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
     try
@@ -568,7 +269,9 @@ app.MapPost("/api/query/answer", async (
             return Results.BadRequest(new { error = "TopK must be between 1 and 50" });
         }
 
-        Console.WriteLine($"💬 RAG Question: \"{request.Query}\" (topK={request.TopK ?? 5})");
+        logger.LogInformation(
+            "RAG answer request started: Query=\"{Query}\", TopK={TopK}, Language={Language}",
+            request.Query, request.TopK ?? 5, request.Language ?? "auto");
 
         // STEP 1: Semantic Search (retrieve relevant chunks)
         var searchQuery = new KnowledgeSystem.Application.UseCases.SemanticSearch.SemanticSearchQuery
@@ -579,7 +282,7 @@ app.MapPost("/api/query/answer", async (
         };
 
         var searchResult = await searchHandler.HandleAsync(searchQuery, cancellationToken);
-        Console.WriteLine($"  ✓ Retrieved {searchResult.TotalMatches} relevant chunks");
+        logger.LogDebug("Step 1 complete: Retrieved {MatchCount} relevant chunks", searchResult.TotalMatches);
 
         // STEP 2: Compose Prompt (build structured LLM prompt)
         var composeCommand = new KnowledgeSystem.Application.UseCases.Prompting.ComposePromptCommand
@@ -590,7 +293,9 @@ app.MapPost("/api/query/answer", async (
         };
 
         var composedPrompt = promptHandler.Handle(composeCommand);
-        Console.WriteLine($"  ✓ Prompt composed ({composedPrompt.SourceCount} sources, {composedPrompt.EstimatedTokenCount} tokens)");
+        logger.LogDebug(
+            "Step 2 complete: Prompt composed with {SourceCount} sources, {TokenCount} estimated tokens",
+            composedPrompt.SourceCount, composedPrompt.EstimatedTokenCount);
 
         // STEP 3: Generate Answer (invoke LLM with composed prompt)
         var generateCommand = new KnowledgeSystem.Application.UseCases.GenerateAnswer.GenerateAnswerCommand
@@ -599,7 +304,9 @@ app.MapPost("/api/query/answer", async (
         };
 
         var answerResult = await answerHandler.HandleAsync(generateCommand, cancellationToken);
-        Console.WriteLine($"  ✓ Answer generated (confidence: {answerResult.ConfidenceLevel}, LLM invoked: {answerResult.LlmInvoked})");
+        logger.LogInformation(
+            "RAG answer request completed: Confidence={Confidence}, LLMInvoked={LLMInvoked}, SourceCount={SourceCount}",
+            answerResult.ConfidenceLevel, answerResult.LlmInvoked, answerResult.SourceCount);
 
         // Return structured response
         return Results.Ok(new
@@ -624,12 +331,12 @@ app.MapPost("/api/query/answer", async (
     }
     catch (InvalidOperationException ex)
     {
-        Console.WriteLine($"❌ Answer generation error: {ex.Message}");
+        logger.LogWarning(ex, "RAG answer request validation error");
         return Results.BadRequest(new { error = ex.Message });
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Unexpected error: {ex.Message}");
+        logger.LogError(ex, "Unexpected error during RAG answer generation");
         return Results.Problem($"Answer generation failed: {ex.Message}");
     }
 });
@@ -637,11 +344,7 @@ app.MapPost("/api/query/answer", async (
 app.Run();
 
 // ============================================================================
-// REQUEST/RESPONSE MODELS
+// REQUEST/RESPONSE MODELS (Clean Architecture)
 // ============================================================================
-record TestEmbeddingRequest(string Text);
-record TestChunkingRequest(string Text, int? MaxChunkSize, int? Overlap);
-record IngestTextRequest(string Text, string Title, string? Metadata);
-record SearchRequest(string Query, int? TopK, double? SimilarityThreshold);
 record SemanticSearchRequest(string Query, int? TopK, string? DocumentId);
 record AnswerQueryRequest(string Query, int? TopK, string? DocumentId, string? Language);
